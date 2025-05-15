@@ -97,7 +97,7 @@ jobs:
           password: ${{ secrets.cr_token }}
 
       - name: Build Docker
-        uses: docker/build-push-action@v3.1.1
+        uses: docker/build-push-action@v6.17.0
         with:
           context: .
           outputs: type=docker
