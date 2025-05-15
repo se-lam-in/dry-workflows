@@ -136,7 +136,7 @@ jobs:
           node-version: '12'
       - name: deploy to cluster
         run: |
-           helm: upgrade ${{ env.SERVICE_NAME }} --install Charts/${{ env.SERVICE_NAME }} -f Charts/${{ env.SERVICE_NAME }}/values.yaml -n ${{ needs.define.outputs.Namespace }} --create-namespace --set image.tag=${{ env.SERVICE_NAME }}-${GITHUB_REF#refs/*/}
+           helm upgrade ${{ env.SERVICE_NAME }} --install Charts/${{ env.SERVICE_NAME }} -f Charts/${{ env.SERVICE_NAME }}/values.yaml -n ${{ needs.define.outputs.Namespace }} --create-namespace --set image.tag=${{ env.SERVICE_NAME }}-${GITHUB_REF#refs/*/}
           
       - name: Restore kubectl Context To Default
         if: always()
