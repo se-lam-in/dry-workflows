@@ -1,0 +1,145 @@
+name: Deploy Service/Web App
+
+on:
+  workflow_call:
+    inputs:
+      service_name:
+        description: 'Name of service/web app'
+        required: false
+        type: string
+    secrets:
+      cr_username:
+        required: true
+      cr_token:
+        required: true
+      pat_token:
+        required: true
+
+env:
+  SERVICE_NAME: ${{ inputs.service_name || github.event.repository.name  }}
+
+jobs:
+
+  define:
+    runs-on: ubuntu-latest
+
+    outputs:
+      nodeEnv: ${{ steps.nodeEnv.outputs.value }}
+      publishedPort: ${{ steps.manifest.outputs.published_ports }}
+      targetPort: ${{ steps.manifest.outputs.target_ports }}
+      clusterContext: ${{ steps.manifest.outputs.cluster_contexts }}
+      Namespace: ${{ steps.manifest.outputs.namespaces }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Set manifest deployment
+        id: manifest
+        run: |
+          cd .github/deployment/templates/
+          if ${{endsWith(github.event.ref, 'prod')}}
+          then
+            manifest=$(cat production.yml)
+            echo "published_ports=$(echo "$manifest" | yq eval '.published_port' -)" >> $GITHUB_OUTPUT
+            echo "target_ports=$(echo "$manifest" | yq eval '.target_port' -)" >> $GITHUB_OUTPUT
+            echo "cluster_contexts=$(echo "$manifest" | yq eval '.cluster_context' -)" >> $GITHUB_OUTPUT
+            echo "namespaces=$(echo "$manifest" | yq eval '.namespace' -)" >> $GITHUB_OUTPUT
+          elif ${{endsWith(github.event.ref, 'dev')}}
+          then
+            manifest=$(cat development.yml)
+            echo "published_ports=$(echo "$manifest" | yq eval '.published_port' -)" >> $GITHUB_OUTPUT
+            echo "target_ports=$(echo "$manifest" | yq eval '.target_port' -)" >> $GITHUB_OUTPUT
+            echo "cluster_contexts=$(echo "$manifest" | yq eval '.cluster_context' -)" >> $GITHUB_OUTPUT
+            echo "namespaces=$(echo "$manifest" | yq eval '.namespace' -)" >> $GITHUB_OUTPUT
+          elif ${{endsWith(github.event.ref, 'staging')}}
+          then
+            manifest=$(cat staging.yml)
+            echo "published_ports=$(echo "$manifest" | yq eval '.published_port' -)" >> $GITHUB_OUTPUT
+            echo "target_ports=$(echo "$manifest" | yq eval '.target_port' -)" >> $GITHUB_OUTPUT
+            echo "cluster_contexts=$(echo "$manifest" | yq eval '.cluster_context' -)" >> $GITHUB_OUTPUT
+            echo "namespaces=$(echo "$manifest" | yq eval '.namespace' -)" >> $GITHUB_OUTPUT
+          elif ${{endsWith(github.event.ref, 'ops')}}
+          then
+            manifest=$(cat operation.yml)
+            echo "published_ports=$(echo "$manifest" | yq eval '.published_port' -)" >> $GITHUB_OUTPUT
+            echo "target_ports=$(echo "$manifest" | yq eval '.target_port' -)" >> $GITHUB_OUTPUT
+            echo "cluster_contexts=$(echo "$manifest" | yq eval '.cluster_context' -)" >> $GITHUB_OUTPUT
+            echo "namespaces=$(echo "$manifest" | yq eval '.namespace' -)" >> $GITHUB_OUTPUT
+          else
+            manifest=$(cat release.yml)
+            echo "published_ports=$(echo "$manifest" | yq eval '.published_port' -)" >> $GITHUB_OUTPUT
+            echo "target_ports=$(echo "$manifest" | yq eval '.target_port' -)" >> $GITHUB_OUTPUT
+            echo "cluster_contexts=$(echo "$manifest" | yq eval '.cluster_context' -)" >> $GITHUB_OUTPUT
+            echo "namespaces=$(echo "$manifest" | yq eval '.namespace' -)" >> $GITHUB_OUTPUT
+          fi
+
+      - id: nodeEnv
+        run: |
+          if ${{endsWith(github.event.ref, 'prod')}}
+          then
+            echo "value=production" >> $GITHUB_OUTPUT
+            echo "::notice title=NODE_ENV::production"
+          elif ${{endsWith(github.event.ref, 'staging')}}
+          then
+            echo "value=staging" >> $GITHUB_OUTPUT
+            echo "::notice title=NODE_ENV::staging"
+          elif ${{endsWith(github.event.ref, 'release')}}
+          then
+            echo "value=release" >> $GITHUB_OUTPUT
+            echo "::notice title=NODE_ENV::release"
+          elif ${{endsWith(github.event.ref, 'ops')}}
+          then
+            echo "value=release" >> $GITHUB_OUTPUT
+            echo "::notice title=NODE_ENV::operation"
+          else
+            echo "value=development" >> $GITHUB_OUTPUT
+            echo "::notice title=NODE_ENV::development"
+          fi
+
+      - name: Notice manifest
+        run: |
+          echo "::notice title=manifest published_port created::${{ steps.manifest.outputs.published_ports }}"
+          echo "::notice title=manifest target_port created::${{ steps.manifest.outputs.target_ports }}"
+          echo "::notice title=manifest docker_context created::${{ steps.manifest.outputs.cluster_contexts }}"
+          echo "::notice title=manifest max_replica created::${{ steps.manifest.outputs.namespaces }}"    
+      
+  metadata:
+    runs-on: ubuntu-latest 
+
+    outputs:
+      imageTag: ${{ steps.meta.outputs.tags }}
+
+    steps:
+      - name: Docker Meta
+        id: meta
+        run: echo "tags=adeekur861/${{ env.SERVICE_NAME }}:${GITHUB_REF#refs/*/}" >> $GITHUB_OUTPUT 
+
+      - name: Notice Meta
+        run: echo "::notice title=meta tag created::${{ steps.meta.outputs.tags }}"
+
+  argocd-deployment:
+    needs: [metadata, define]
+    runs-on: [self-hosted]
+
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set Context
+        run: sudo kubectl config use-context ${{ needs.define.outputs.clusterContext }}
+
+      - name: Check Deployment
+        run: |
+            echo "DEPLOYMENT=$(kubectl get deploy -n ${{ needs.define.outputs.Namespace }} | grep -c ${{ env.SERVICE_NAME }})" >> $GITHUB_ENV
+
+      - uses: actions/setup-node@v3
+        if: env.DEPLOYMENT == 0
+        with:
+          node-version: '12'
+      - name: deploy to cluster
+        run: |
+           helm: upgrade ${{ env.SERVICE_NAME }} --install Charts/${{ env.SERVICE_NAME }} -f Charts/${{ env.SERVICE_NAME }}/values.yaml -n ${{ needs.define.outputs.Namespace }} --create-namespace --set image.tag=${{ env.SERVICE_NAME }}-${GITHUB_REF#refs/*/}
+          
+      - name: Restore kubectl Context To Default
+        if: always()
+        run: sudo kubectl config use-context default
