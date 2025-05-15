@@ -12,8 +12,6 @@ on:
         required: true
       cr_token:
         required: true
-      pat_token:
-        required: true
 
 env:
   SERVICE_NAME: ${{ inputs.service_name || github.event.repository.name  }}
